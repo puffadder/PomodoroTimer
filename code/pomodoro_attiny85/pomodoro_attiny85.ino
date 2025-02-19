@@ -2,18 +2,18 @@
 #include <avr/interrupt.h>
 #include <avr/power.h>
 
-//#define RESET_INTERRUPT
+#define RESET_INTERRUPT
 
 #ifdef RESET_INTERRUPT
-#define INTERRUPT_PIN PCINT4 /* Same as PB4 */
+#define INTERRUPT_PIN PCINT0 /* Same as PB0 */
 #endif
 
 const int redLEDPin = PB1;
 const int greenLEDPin = PB2;
-const int buzzerPin = PB0;
+const int buzzerPin = PB3;
 
 #ifdef RESET_INTERRUPT
-const int resetPin = PB4;
+const int resetPin = PB0;
 #else
 const int resetPin = PB5;
 #endif
@@ -31,7 +31,7 @@ PomodoroState state = INIT;
 unsigned long pomodoroCount = 0U;
 unsigned long pomodoroTotalCount = 0U;
 
-const unsigned int clock_div = 16U;
+const unsigned int clock_div = 1U; //16U;
 
 const unsigned int numShortBreaks = 3U;
 const unsigned long pomodoroOnMs = 1500000UL; // 25 minutes
@@ -45,12 +45,14 @@ const unsigned int deBounceTimeMs = 200U;
 volatile unsigned int isReset = 0U;
 
 void setup() {
-  clock_prescale_set(clock_div_16); /* Make it run at 16.5 / 16 MHz - roughly 1 MHz */
+  //clock_prescale_set(clock_div_16); /* Make it run at 16.5 / 16 MHz - roughly 1 MHz */
 
   //Serial.begin(9600);
   pinMode(buzzerPin, OUTPUT);
   pinMode(redLEDPin, OUTPUT);
   pinMode(greenLEDPin, OUTPUT);
+
+  ADCSRA &= ~ADEN; /* Disable ADC */
 
 #ifdef RESET_INTERRUPT
   cli(); /* Disable interrupts during setup */
