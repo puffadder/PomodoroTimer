@@ -1,6 +1,8 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/power.h>
+#include <avr/sleep.h>
+#include <avr/wdt.h>
 
 #define RESET_INTERRUPT
 
@@ -28,21 +30,27 @@ typedef enum
 }PomodoroState;
 
 PomodoroState state = INIT;
-unsigned long pomodoroCount = 0U;
-unsigned long pomodoroTotalCount = 0U;
+uint32_t pomodoroCount = 0U;
+uint32_t pomodoroTotalCount = 0U;
 
-const unsigned int clock_div = 1U; //16U;
+const uint32_t clock_div = 1U; //16U;
 
-const unsigned int numShortBreaks = 3U;
-const unsigned long pomodoroOnMs = 1500000UL; // 25 minutes
-const unsigned long pomodoroShortBreakMs = 300000UL; // 5 minutes
-const unsigned long pomodoroLongBreakMs = 900000UL; // 15 minutes
+const uint32_t numShortBreaks = 3U;
+
+const uint32_t pomodoroOnMs = 1500000U; // 25 minutes
+const uint32_t pomodoroShortBreakMs = 300000U; // 5 minutes
+const uint32_t pomodoroLongBreakMs = 900000U; // 15 minutes
 
 #ifdef RESET_INTERRUPT
-const unsigned int deBounceTimeMs = 200U;
+const uint32_t deBounceTimeMs = 200U;
+
+uint32_t numSleeps = 0U;
+const uint32_t wakeupTime = 64U;
+const uint32_t wdtError = 24U;
+extern volatile unsigned long millis_timer_millis;
 #endif
 
-volatile unsigned int isReset = 0U;
+volatile uint32_t isReset = 0U;
 
 void setup() {
   //clock_prescale_set(clock_div_16); /* Make it run at 16.5 / 16 MHz - roughly 1 MHz */
@@ -52,13 +60,14 @@ void setup() {
   pinMode(redLEDPin, OUTPUT);
   pinMode(greenLEDPin, OUTPUT);
 
-  ADCSRA &= ~ADEN; /* Disable ADC */
-
 #ifdef RESET_INTERRUPT
   cli(); /* Disable interrupts during setup */
   PCMSK |= (1 << INTERRUPT_PIN);    /* Enable ISR for chosen interrupt pin (PCINT1/PB1/pin 6) */
   GIMSK |= (1 << PCIE);             /* Enable PCINT interrupt in the general interrupt mask */
+  ADCSRA &= ~ADEN; /* Disable ADC */
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   pinMode(resetPin, INPUT_PULLUP);
+  sleep_enable();
   sei(); /* Enable interrupts after setup */
 #else
   pinMode(A0, INPUT); /* Set PB5 to input */
@@ -69,17 +78,11 @@ void loop() {
   switch (state)
   {
     case INIT:
-      //Serial.println("In INIT state");
       state = POMODORO;
       break;
     case POMODORO:
-      //Serial.println("In POMODORO state");
       SignalPomodoroOn();
-      if (1U == isReset)
-      {
-        isReset = 0U;
-      }
-      DelayMs(pomodoroOnMs, 1U);
+      SleepMs(pomodoroOnMs);
       if (1U == isReset)
       {
         isReset = 0U;
@@ -99,9 +102,8 @@ void loop() {
       }
       break;
     case POMODORO_SHORT_BREAK:
-      //Serial.println("In POMODORO_SHORT_BREAK state");
       SignalPomodoroOff();
-      DelayMs(pomodoroShortBreakMs, 1U);
+      SleepMs(pomodoroShortBreakMs);
       if (1U == isReset)
       {
         isReset = 0U;
@@ -111,8 +113,8 @@ void loop() {
     case POMODORO_LONG_BREAK:
       //Serial.println("In POMODORO_LONG_BREAK state");
       SignalPomodoroOff();
-      DelayMs(pomodoroLongBreakMs, 1U);
-      if (1 == isReset)
+      SleepMs(pomodoroLongBreakMs);
+      if (1U == isReset)
       {
         isReset = 0;
       }
@@ -129,7 +131,7 @@ void SignalPomodoroOff()
 {
   digitalWrite(greenLEDPin, LOW);
 
-  unsigned int ledBlinkCount = 0U;
+  uint32_t ledBlinkCount = 0U;
   for (ledBlinkCount = 0; ledBlinkCount < 10; ledBlinkCount++)
   {
     digitalWrite(redLEDPin, LOW);
@@ -145,7 +147,7 @@ void SignalPomodoroOn()
 {
   digitalWrite(redLEDPin, LOW);
 
-  unsigned int ledBlinkCount = 0U;
+  uint32_t ledBlinkCount = 0U;
   for (ledBlinkCount = 0; ledBlinkCount < 10; ledBlinkCount++)
   {
     DelayMs(100U, 0U);
@@ -154,12 +156,12 @@ void SignalPomodoroOn()
     digitalWrite(greenLEDPin, HIGH);
   }
   
-  SoundBuzzer(0U);
+  SoundBuzzer(1U);
 }
 
-void SoundBuzzer(unsigned int breakIfReset)
+void SoundBuzzer(uint32_t breakIfReset)
 {
-  unsigned int buzzCount = 0;
+  uint32_t buzzCount = 0;
   for (buzzCount = 0U; (buzzCount < 3U) && (((1U == breakIfReset) && (0U == isReset)) || (0U == breakIfReset)); buzzCount++)
   {
     digitalWrite(buzzerPin, HIGH);
@@ -169,21 +171,68 @@ void SoundBuzzer(unsigned int breakIfReset)
   }
 }
 
-void DelayMs(unsigned long delayMs, unsigned int breakIfReset)
+/*
+ * @param aWatchdogPrescaler (see wdt.h) can be one of WDTO_15MS, 30, 60, 120, 250, WDTO_500MS, WDTO_1S to WDTO_8S
+ *                                                    0 (15 ms) to 3(120 ms), 4 (250 ms) up to 9 (8000 ms)
+ */
+uint16_t computeSleepMillis(uint8_t aWatchdogPrescaler) {
+    uint16_t tResultMillis = 8000;
+    for (uint8_t i = 0; i < (9 - aWatchdogPrescaler); ++i) {
+        tResultMillis = (tResultMillis / 2);
+    }
+    return tResultMillis + wakeupTime; // + 64 for the startup time
+}
+
+/*
+ * @param aWatchdogPrescaler (see wdt.h) can be one of WDTO_15MS, 30, 60, 120, 250, WDTO_500MS, WDTO_1S to WDTO_8S
+ * @param aAdjustMillis if true, adjust the Arduino internal millis counter the get quite correct millis() 
+ * results even after sleep, since the periodic 1 ms timer interrupt is disabled while sleeping.
+ */
+void sleepWithWatchdog(uint8_t aWatchdogPrescaler, bool aAdjustMillis) {
+    MCUSR = 0; // Clear MCUSR to enable a correct interpretation of MCUSR after reset
+
+    // use wdt_enable() since it handles that the WDP3 bit is in bit 5 of the WDTCR register
+    wdt_enable(aWatchdogPrescaler);
+    WDTCR |= _BV(WDIE) | _BV(WDIF); // Watchdog interrupt enable + reset interrupt flag -> needs ISR(WDT_vect)
+    sei();         // Enable interrupts
+    sleep_cpu();   // The watchdog interrupt will wake us up from sleep
+
+    // We wake up here :-)
+    wdt_disable(); // Because next interrupt will otherwise lead to a reset, since wdt_enable() sets WDE / Watchdog System Reset Enable
+    /*
+     * Since timer clock may be disabled adjust millis only if not slept in IDLE mode (SM2...0 bits are 000)
+     */
+    if (aAdjustMillis && (MCUCR & ((_BV(SM1) | _BV(SM0)))) != 0) {
+        millis_timer_millis += computeSleepMillis(aWatchdogPrescaler);
+    }
+}
+
+void SleepMs(uint32_t sleepTimeMs)
 {
-  unsigned long prevTime = millis();
+  uint32_t totalTimeMs = 0U;
+
+  while (0U == isReset)
+  {
+    sleepWithWatchdog(WDTO_1S, false);
+    totalTimeMs += (1000U + wdtError + wakeupTime);
+
+    if (totalTimeMs >= sleepTimeMs)
+    {
+      break;
+    }
+  }
+}
+
+void DelayMs(uint32_t delayMs, uint32_t breakIfReset)
+{
+  uint32_t prevTime = millis();
   delayMs = delayMs / clock_div;
 
   while (1)
   {
-    unsigned long currTime = millis();
-    if(analogRead(A0) < 930)
-    {
-      isReset = 1U;
-    }
+    uint32_t currTime = millis();
     if (((1U == breakIfReset) && (1U == isReset)) || ((currTime - prevTime) >= delayMs))
     {
-      //Serial.println("delay loop over!");
       break;
     }
   }
@@ -192,14 +241,17 @@ void DelayMs(unsigned long delayMs, unsigned int breakIfReset)
 #ifdef RESET_INTERRUPT
 ISR(PCINT0_vect)
 {
-  static unsigned long lastInterruptTime = 0;
-  unsigned long currInterruptTime = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
+  static uint32_t lastInterruptTime = 0U;
+  uint32_t currInterruptTime = millis();
+  /* If interrupts come faster than 200ms, assume it's a bounce and ignore */
   if ((currInterruptTime - lastInterruptTime) > deBounceTimeMs)
   {
-    //Serial.println("inside button ISR");
     isReset = 1U;
   }
   lastInterruptTime = currInterruptTime;
+}
+
+ISR(WDT_vect) {
+    numSleeps++;
 }
 #endif
