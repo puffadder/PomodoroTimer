@@ -14,6 +14,8 @@ const int redLEDPin = PB1;
 const int greenLEDPin = PB2;
 const int buzzerPin = PB3;
 
+uint32_t isFirst = 1U;
+
 #ifdef RESET_INTERRUPT
 const int resetPin = PB0;
 #else
@@ -33,7 +35,7 @@ PomodoroState state = INIT;
 uint32_t pomodoroCount = 0U;
 uint32_t pomodoroTotalCount = 0U;
 
-const uint32_t clock_div = 1U; //16U;
+const uint32_t clockDiv = 1U; //16U;
 
 const uint32_t numShortBreaks = 3U;
 
@@ -53,7 +55,7 @@ extern volatile unsigned long millis_timer_millis;
 volatile uint32_t isReset = 0U;
 
 void setup() {
-  //clock_prescale_set(clock_div_16); /* Make it run at 16.5 / 16 MHz - roughly 1 MHz */
+  //clock_prescale_set(clockDiv_16); /* Make it run at 16.5 / 16 MHz - roughly 1 MHz */
 
   //Serial.begin(9600);
   pinMode(buzzerPin, OUTPUT);
@@ -155,8 +157,15 @@ void SignalPomodoroOn()
     DelayMs(100U, 0U);
     digitalWrite(greenLEDPin, HIGH);
   }
-  
-  SoundBuzzer(1U);
+
+  if (1U == isFirst)
+  {
+    isFirst = 0U;
+  }
+  else
+  {
+    SoundBuzzer(1U);
+  }
 }
 
 void SoundBuzzer(uint32_t breakIfReset)
@@ -226,7 +235,7 @@ void SleepMs(uint32_t sleepTimeMs)
 void DelayMs(uint32_t delayMs, uint32_t breakIfReset)
 {
   uint32_t prevTime = millis();
-  delayMs = delayMs / clock_div;
+  delayMs = delayMs / clockDiv;
 
   while (1)
   {
