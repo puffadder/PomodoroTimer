@@ -1,11 +1,14 @@
 # Pomodoro Timer
 
-## Description
 The **Pomodoro Timer** is a timer designed to manage productivity using the Pomodoro Technique.
 
 The work intervals are as follows:
 
-There are three 25-minute work intervals, each separated by a break of 5 mins. After the fourth work session (or **Pomodoro** as I just call it), there is a longer 15 minute break. This cycle continues until the Pomodoro Timer is reset or powered off. 
+There are three 25-minute work intervals, each separated by a break of 5 mins. After the fourth work session (or *Pomodoro* as I just call it), there is a longer 15 minute break. This cycle continues until the Pomodoro Timer is reset or powered off.
+
+A buzzer goes off after every work or break interval. This can be turned off with a switch.
+
+The LED blinks green if a work interval is starting and it blinks red if a break is starting.
 
 The code is for an ATTiny85 microcontroller. The hardware and PCB design are shown below.
 
